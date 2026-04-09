@@ -21,9 +21,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -55,6 +55,8 @@ constructor(
         context.dataStore.data
             .map { preferences ->
                 val providerOrder = preferences[LyricsProviderOrderKey] ?: ""
+                Timber.tag("LyricsHelper")
+                            .d("Current Lyrics Order: ${providerOrder}")
                 if (providerOrder.isNotBlank()) {
                     // Use the new provider order if available
                     LyricsProviderRegistry.getOrderedProviders(providerOrder)
@@ -99,6 +101,15 @@ constructor(
                             YouTubeSubtitleLyricsProvider,
                             YouTubeLyricsProvider
                         )
+                        PreferredLyricsProvider.LYRICSPLUS -> listOf(
+                            LyricsPlusProvider,
+                            BetterLyricsProvider,
+                            PaxsenixLyricsProvider,
+                            LrcLibLyricsProvider,
+                            KuGouLyricsProvider,
+                            YouTubeSubtitleLyricsProvider,
+                            YouTubeLyricsProvider
+                        )
                     }
                 }
             }.distinctUntilChanged()
@@ -117,6 +128,15 @@ constructor(
             return LyricsWithProvider(cached.lyrics, cached.providerName)
         }
 
+        val orderedProviders = context.dataStore.data.map { preferences ->
+        val providerOrder = preferences[LyricsProviderOrderKey] ?: ""
+        if (providerOrder.isNotBlank()) {
+            LyricsProviderRegistry.getOrderedProviders(providerOrder)
+        } else {
+            lyricsProviders
+        }
+        }.first()
+
         // Check network connectivity before making network requests
         // Use synchronous check as fallback if flow doesn't emit
         val isNetworkAvailable = try {
@@ -132,57 +152,66 @@ constructor(
 
         val result = withTimeoutOrNull(MAX_LYRICS_FETCH_MS) {
             val cleanedTitle = LyricsUtils.cleanTitleForSearch(mediaMetadata.title)
-            val enabledProviders = lyricsProviders.filter { it.isEnabled(context) }
+            val enabledProviders = orderedProviders.filter { it.isEnabled(context) }
 
             // Launch ALL providers concurrently, indexed so we can sort by priority later
-            val deferredResults = enabledProviders.mapIndexed { index, provider ->
-                async {
+            val channel = Channel<Pair<Int, LyricsWithProvider?>>(
+                capacity = enabledProviders.size
+            )
+            val jobs = enabledProviders.mapIndexed { index, provider ->
+                launch {
                     try {
                         Timber.tag("LyricsHelper")
                             .d("Trying provider concurrently: ${provider.name} for $cleanedTitle")
-                        val providerResult = withTimeoutOrNull(MAX_LYRICS_FETCH_MS) {
-                            provider.getLyrics(
-                                context,
-                                mediaMetadata.id,
-                                cleanedTitle,
-                                mediaMetadata.artists.joinToString { it.name },
-                                mediaMetadata.duration,
-                                mediaMetadata.album?.title,
-                            )
-                        }
-                        when {
-                            providerResult?.isSuccess == true -> {
-                                Timber.tag("LyricsHelper").i("Got lyrics from ${provider.name}")
-                                Triple(index, provider, providerResult)
-                            }
-                            providerResult == null -> {
-                                Timber.tag("LyricsHelper").w("${provider.name} timed out")
-                                null
-                            }
-                            else -> {
-                                Timber.tag("LyricsHelper")
-                                    .w("${provider.name} failed: ${providerResult.exceptionOrNull()?.message}")
-                                null
-                            }
+                        val providerResult = provider.getLyrics(
+                            context,
+                            mediaMetadata.id,
+                            cleanedTitle,
+                            mediaMetadata.artists.joinToString { it.name },
+                            mediaMetadata.duration,
+                            mediaMetadata.album?.title,
+                        )
+                        if (providerResult.isSuccess) {
+                            Timber.tag("LyricsHelper").i("Got lyrics from ${provider.name}")
+                            val filteredLyrics = LyricsUtils.filterLyricsCreditLines(providerResult.getOrNull()!!)
+                            channel.send(Pair(index, LyricsWithProvider(filteredLyrics, provider.name)))
+                        } else {
+                            Timber.tag("LyricsHelper")
+                                .w("${provider.name} failed: ${providerResult.exceptionOrNull()?.message}")
+                            channel.send(Pair(index, null))
                         }
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
                         Timber.tag("LyricsHelper").w("${provider.name} threw exception: ${e.message}")
-                        null
+                        channel.send(Pair(index, null))
                     }
                 }
             }
 
-            // Wait for all providers to finish, then pick the highest-priority success
-            val successResults = deferredResults.awaitAll().filterNotNull()
-            val best = successResults.minByOrNull { it.first } // lowest index = highest priority
+            // Close channel once all provider jobs finish
+            launch {
+                jobs.forEach { it.join() }
+                channel.close()
+            }
 
-            if (best != null) {
-                val (_, provider, providerResult) = best
-                val filteredLyrics = LyricsUtils.filterLyricsCreditLines(providerResult.getOrNull()!!)
-                LyricsWithProvider(filteredLyrics, provider.name)
-            } else {
+            // Collect results as they arrive; return immediately once the highest-priority
+            // provider that can still win has responded (no lower-index result can come after)
+            var bestIndex = Int.MAX_VALUE
+            var bestResult: LyricsWithProvider? = null
+            val remaining = enabledProviders.indices.toMutableSet()
+
+            for ((index, result) in channel) {
+                remaining.remove(index)
+                if (result != null && index < bestIndex) {
+                    bestIndex = index
+                    bestResult = result
+                }
+                // If no pending provider has a lower index than our current best, stop waiting
+                if (remaining.none { it < bestIndex }) break
+            }
+
+            bestResult ?: run {
                 Timber.tag("LyricsHelper").w("All providers failed for ${mediaMetadata.title}")
                 LyricsWithProvider(LYRICS_NOT_FOUND, PROVIDER_NONE)
             }
