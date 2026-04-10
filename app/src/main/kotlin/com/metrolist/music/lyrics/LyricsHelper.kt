@@ -40,82 +40,13 @@ constructor(
     @ApplicationContext private val context: Context,
     private val networkConnectivity: NetworkConnectivityObserver,
 ) {
-    private var lyricsProviders =
-        listOf(
-            BetterLyricsProvider,
-            PaxsenixLyricsProvider,
-            LrcLibLyricsProvider,
-            KuGouLyricsProvider,
-            LyricsPlusProvider,
-            YouTubeSubtitleLyricsProvider,
-            YouTubeLyricsProvider
-        )
-
     val preferred =
         context.dataStore.data
             .map { preferences ->
-                val providerOrder = preferences[LyricsProviderOrderKey] ?: ""
                 Timber.tag("LyricsHelper")
-                            .d("Current Lyrics Order: ${providerOrder}")
-                if (providerOrder.isNotBlank()) {
-                    // Use the new provider order if available
-                    LyricsProviderRegistry.getOrderedProviders(providerOrder)
-                } else {
-                    // Fall back to preferred provider logic for backward compatibility
-                    val preferredProvider = preferences[PreferredLyricsProviderKey]
-                        .toEnum(PreferredLyricsProvider.LRCLIB)
-                    when (preferredProvider) {
-                        PreferredLyricsProvider.LRCLIB -> listOf(
-                            LrcLibLyricsProvider,
-                            BetterLyricsProvider,
-                            PaxsenixLyricsProvider,
-                            KuGouLyricsProvider,
-                            LyricsPlusProvider,
-                            YouTubeSubtitleLyricsProvider,
-                            YouTubeLyricsProvider
-                        )
-                        PreferredLyricsProvider.KUGOU -> listOf(
-                            KuGouLyricsProvider,
-                            BetterLyricsProvider,
-                            PaxsenixLyricsProvider,
-                            LrcLibLyricsProvider,
-                            LyricsPlusProvider,
-                            YouTubeSubtitleLyricsProvider,
-                            YouTubeLyricsProvider
-                        )
-                        PreferredLyricsProvider.BETTER_LYRICS -> listOf(
-                            BetterLyricsProvider,
-                            PaxsenixLyricsProvider,
-                            LrcLibLyricsProvider,
-                            KuGouLyricsProvider,
-                            LyricsPlusProvider,
-                            YouTubeSubtitleLyricsProvider,
-                            YouTubeLyricsProvider
-                        )
-                        PreferredLyricsProvider.PAXSENIX -> listOf(
-                            PaxsenixLyricsProvider,
-                            BetterLyricsProvider,
-                            LrcLibLyricsProvider,
-                            KuGouLyricsProvider,
-                            LyricsPlusProvider,
-                            YouTubeSubtitleLyricsProvider,
-                            YouTubeLyricsProvider
-                        )
-                        PreferredLyricsProvider.LYRICSPLUS -> listOf(
-                            LyricsPlusProvider,
-                            BetterLyricsProvider,
-                            PaxsenixLyricsProvider,
-                            LrcLibLyricsProvider,
-                            KuGouLyricsProvider,
-                            YouTubeSubtitleLyricsProvider,
-                            YouTubeLyricsProvider
-                        )
-                    }
-                }
+                    .d("Current Lyrics Order: ${preferences[LyricsProviderOrderKey] ?: ""}")
+                resolveLyricsProviders(preferences)
             }.distinctUntilChanged()
-            .map { providers ->
-                lyricsProviders = providers
-            }
 
     private val cache = LruCache<String, List<LyricsResult>>(MAX_CACHE_SIZE)
     private var currentLyricsJob: Job? = null
@@ -128,14 +59,9 @@ constructor(
             return LyricsWithProvider(cached.lyrics, cached.providerName)
         }
 
-        val orderedProviders = context.dataStore.data.map { preferences ->
-        val providerOrder = preferences[LyricsProviderOrderKey] ?: ""
-        if (providerOrder.isNotBlank()) {
-            LyricsProviderRegistry.getOrderedProviders(providerOrder)
-        } else {
-            lyricsProviders
-        }
-        }.first()
+        val orderedProviders = context.dataStore.data
+            .map { preferences -> resolveLyricsProviders(preferences) }
+            .first()
 
         // Check network connectivity before making network requests
         // Use synchronous check as fallback if flow doesn't emit
@@ -190,7 +116,7 @@ constructor(
             }
 
             // Close channel once all provider jobs finish
-            launch {
+            val closer = launch {
                 jobs.forEach { it.join() }
                 channel.close()
             }
@@ -201,14 +127,20 @@ constructor(
             var bestResult: LyricsWithProvider? = null
             val remaining = enabledProviders.indices.toMutableSet()
 
-            for ((index, result) in channel) {
-                remaining.remove(index)
-                if (result != null && index < bestIndex) {
-                    bestIndex = index
-                    bestResult = result
+            try {
+                for ((index, result) in channel) {
+                    remaining.remove(index)
+                    if (result != null && index < bestIndex) {
+                        bestIndex = index
+                        bestResult = result
+                    }
+                    // If no pending provider has a lower index than our current best, stop waiting
+                    if (remaining.none { it < bestIndex }) break
                 }
-                // If no pending provider has a lower index than our current best, stop waiting
-                if (remaining.none { it < bestIndex }) break
+            } finally {
+                jobs.forEach { it.cancel() }
+                closer.cancel()
+                channel.cancel()
             }
 
             bestResult ?: run {
@@ -250,7 +182,10 @@ constructor(
         val allResult = mutableListOf<LyricsResult>()
         currentLyricsJob = CoroutineScope(SupervisorJob()).launch {
             val cleanedTitle = LyricsUtils.cleanTitleForSearch(songTitle)
-            val enabledProviders = lyricsProviders.filter { it.isEnabled(context) }
+            val allProviders = context.dataStore.data
+                .map { preferences -> resolveLyricsProviders(preferences) }
+                .first()
+            val enabledProviders = allProviders.filter { it.isEnabled(context) }
 
             // Fetch from all providers concurrently; callback fires as each one finishes
             val jobs = enabledProviders.map { provider ->
@@ -280,6 +215,60 @@ constructor(
     fun cancelCurrentLyricsJob() {
         currentLyricsJob?.cancel()
         currentLyricsJob = null
+    }
+
+    private fun resolveLyricsProviders(preferences: androidx.datastore.preferences.core.Preferences): List<LyricsProvider> {
+        val providerOrder = preferences[LyricsProviderOrderKey].orEmpty()
+        if (providerOrder.isNotBlank()) {
+            return LyricsProviderRegistry.getOrderedProviders(providerOrder)
+        }
+        return when (preferences[PreferredLyricsProviderKey].toEnum(PreferredLyricsProvider.LRCLIB)) {
+            PreferredLyricsProvider.LRCLIB -> listOf(
+                LrcLibLyricsProvider,
+                BetterLyricsProvider,
+                PaxsenixLyricsProvider,
+                KuGouLyricsProvider,
+                LyricsPlusProvider,
+                YouTubeSubtitleLyricsProvider,
+                YouTubeLyricsProvider,
+            )
+            PreferredLyricsProvider.KUGOU -> listOf(
+                KuGouLyricsProvider,
+                BetterLyricsProvider,
+                PaxsenixLyricsProvider,
+                LrcLibLyricsProvider,
+                LyricsPlusProvider,
+                YouTubeSubtitleLyricsProvider,
+                YouTubeLyricsProvider,
+            )
+            PreferredLyricsProvider.BETTER_LYRICS -> listOf(
+                BetterLyricsProvider,
+                PaxsenixLyricsProvider,
+                LrcLibLyricsProvider,
+                KuGouLyricsProvider,
+                LyricsPlusProvider,
+                YouTubeSubtitleLyricsProvider,
+                YouTubeLyricsProvider,
+            )
+            PreferredLyricsProvider.PAXSENIX -> listOf(
+                PaxsenixLyricsProvider,
+                BetterLyricsProvider,
+                LrcLibLyricsProvider,
+                KuGouLyricsProvider,
+                LyricsPlusProvider,
+                YouTubeSubtitleLyricsProvider,
+                YouTubeLyricsProvider,
+            )
+            PreferredLyricsProvider.LYRICSPLUS -> listOf(
+                LyricsPlusProvider,
+                BetterLyricsProvider,
+                PaxsenixLyricsProvider,
+                LrcLibLyricsProvider,
+                KuGouLyricsProvider,
+                YouTubeSubtitleLyricsProvider,
+                YouTubeLyricsProvider,
+            )
+        }
     }
 
     companion object {
