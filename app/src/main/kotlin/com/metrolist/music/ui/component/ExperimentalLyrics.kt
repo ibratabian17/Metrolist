@@ -751,89 +751,121 @@ fun ExperimentalLyrics(
                         }
                         val animatedOffset by animateFloatAsState(
                             targetValue = if (isAutoScrollEnabled) targetOffset else frozenOffset.floatValue,
-                            animationSpec = if (isInitialLayout || !isAutoScrollEnabled) snap() 
-                                            else {
-                                                tween(LYRICS_SCROLL_DURATION, (distance * LYRICS_STAGGER_DELAY_PER_DISTANCE).coerceAtMost(LYRICS_STAGGER_DELAY_MAX_MS), FastOutSlowInEasing)
-                                            },
+                            animationSpec = if (isInitialLayout || !isAutoScrollEnabled) snap()
+                                            else tween(LYRICS_SCROLL_DURATION, (distance * LYRICS_STAGGER_DELAY_PER_DISTANCE).coerceAtMost(LYRICS_STAGGER_DELAY_MAX_MS), FastOutSlowInEasing),
                             label = "lyricStaggeredOffset_$listIndex"
                         )
-
+                
                         Box(
-                            modifier = Modifier.fillMaxWidth().layout { m, c -> 
+                            modifier = Modifier.fillMaxWidth().layout { m, c ->
                                 val p = m.measure(c.copy(maxHeight = Constraints.Infinity))
                                 layout(p.width, 0) { p.place(0, 0) }
                             }.offset { IntOffset(0, (animatedOffset + userManualOffset).roundToInt()) }
                         ) {
-                            val isVisible by remember {
+                            val isInViewport by remember(maxHeightPx) {
                                 derivedStateOf {
                                     val top = animatedOffset + userManualOffset
-                                    // Increased buffer to ensure items in the measurement window are rendered and measured
                                     top > -2500f && top < maxHeightPx + 2500f
                                 }
                             }
-
-                            if (isVisible) {
-                                when (listItem) {
-                                    is LyricsListItem.Indicator -> {
-                                        val visible =
-                                            isAutoScrollEnabled &&
-                                                currentPositionState >= listItem.gapStartMs &&
-                                                currentPositionState <= listItem.gapEndMs - 650L
-                                        IntervalIndicator(listItem.gapStartMs, listItem.gapEndMs - 650L, currentPositionState, visible, expressiveAccent, 
-                                            Modifier.fillMaxWidth().onSizeChanged { itemHeights[listIndex] = it.height }.padding(horizontal = 24.dp).wrapContentWidth(Alignment.CenterHorizontally))
-                                    }
-                                    is LyricsListItem.Line -> {
-                                        val index = listItem.index
-                                        val item = listItem.entry
-                                        val isActiveLine = activeLineIndices.contains(index)
-                                        val pairedMainLineIndex = if (item.isBackground) (index - 1 downTo 0).firstOrNull { lines.getOrNull(it)?.isBackground == false } ?: -1 else -1
-                                        
-                                        val isInGapWithMain = if (item.isBackground && pairedMainLineIndex != -1) {
-                                            val pairedMainLine = lines[pairedMainLineIndex]
-                                            currentEffectivePosition >= pairedMainLine.time && currentEffectivePosition <= item.time
-                                        } else false
-                                        
-                                        val bgVisible = item.isBackground && (activeLineIndices.contains(pairedMainLineIndex) || activeLineIndices.contains(index) || isInGapWithMain)
-                                        
-                                        LyricsLine(
-                                            index = index, item = item, isSynced = isSynced,
-                                            isActiveLine = isActiveLine,
-                                            bgVisible = bgVisible, isSelected = selectedIndices.contains(index),
-                                            isSelectionModeActive = isSelectionModeActive, currentPositionState = currentPositionState,
-                                            lyricsOffset = (currentSong?.song?.lyricsOffset ?: 0).toLong(),
-                                            playerConnection = playerConnection, lyricsTextSize = 36f, lyricsLineSpacing = 1.3f,
-                                            expressiveAccent = expressiveAccent, lyricsTextPosition = lyricsTextPosition,
-                                            respectAgentPositioning = respectAgentPositioning, isAutoScrollEnabled = isAutoScrollEnabled,
-                                            displayedCurrentLineIndex = deferredCurrentLineIndex, romanizeAsMain = romanizeAsMain,
-                                            enabledLanguages = enabledLanguages, romanizeLyrics = currentSong?.romanizeLyrics == true,
-                                            onSizeChanged = { itemHeights[listIndex] = it },
-                                            onClick = {
-                                                if (isSelectionModeActive) {
-                                                    if (selectedIndices.contains(index)) {
-                                                        selectedIndices.remove(index)
-                                                        if (selectedIndices.isEmpty()) isSelectionModeActive = false
-                                                    } else if (selectedIndices.size < maxSelectionLimit) selectedIndices.add(index)
-                                                    else showMaxSelectionToast = true
-                                                } else if (changeLyrics && !isGuest) {
-                                                    if (item.time < playerConnection.player.duration + 30000L) {
-                                                        playerConnection.seekTo((item.time - (currentSong?.song?.lyricsOffset ?: 0)).coerceAtLeast(0))
-                                                    } else {
-                                                        scrollTargetIndex = index
-                                                        deferredCurrentLineIndex = index
+                
+                            // Items near the active index that haven't been measured yet need
+                            // an invisible pre-render so positions are accurate before they scroll in.
+                            val hasMeasurement = itemHeights.containsKey(listIndex)
+                            val needsPreRender = !hasMeasurement && distance < 30
+                
+                            when {
+                                isInViewport -> {
+                                    // Normal visible render
+                                    when (listItem) {
+                                        is LyricsListItem.Indicator -> {
+                                            val visible =
+                                                isAutoScrollEnabled &&
+                                                    currentPositionState >= listItem.gapStartMs &&
+                                                    currentPositionState <= listItem.gapEndMs - 650L
+                                            IntervalIndicator(listItem.gapStartMs, listItem.gapEndMs - 650L, currentPositionState, visible, expressiveAccent,
+                                                Modifier.fillMaxWidth().onSizeChanged { itemHeights[listIndex] = it.height }.padding(horizontal = 24.dp).wrapContentWidth(Alignment.CenterHorizontally))
+                                        }
+                                        is LyricsListItem.Line -> {
+                                            val index = listItem.index
+                                            val item = listItem.entry
+                                            val isActiveLine = activeLineIndices.contains(index)
+                                            val pairedMainLineIndex = if (item.isBackground) (index - 1 downTo 0).firstOrNull { lines.getOrNull(it)?.isBackground == false } ?: -1 else -1
+                                            val isInGapWithMain = if (item.isBackground && pairedMainLineIndex != -1) {
+                                                val pairedMainLine = lines[pairedMainLineIndex]
+                                                currentEffectivePosition >= pairedMainLine.time && currentEffectivePosition <= item.time
+                                            } else false
+                                            val bgVisible = item.isBackground && (activeLineIndices.contains(pairedMainLineIndex) || activeLineIndices.contains(index) || isInGapWithMain)
+                
+                                            LyricsLine(
+                                                index = index, item = item, isSynced = isSynced,
+                                                isActiveLine = isActiveLine,
+                                                bgVisible = bgVisible, isSelected = selectedIndices.contains(index),
+                                                isSelectionModeActive = isSelectionModeActive, currentPositionState = currentPositionState,
+                                                lyricsOffset = (currentSong?.song?.lyricsOffset ?: 0).toLong(),
+                                                playerConnection = playerConnection, lyricsTextSize = 36f, lyricsLineSpacing = 1.3f,
+                                                expressiveAccent = expressiveAccent, lyricsTextPosition = lyricsTextPosition,
+                                                respectAgentPositioning = respectAgentPositioning, isAutoScrollEnabled = isAutoScrollEnabled,
+                                                displayedCurrentLineIndex = deferredCurrentLineIndex, romanizeAsMain = romanizeAsMain,
+                                                enabledLanguages = enabledLanguages, romanizeLyrics = currentSong?.romanizeLyrics == true,
+                                                onSizeChanged = { itemHeights[listIndex] = it },
+                                                onClick = {
+                                                    if (isSelectionModeActive) {
+                                                        if (selectedIndices.contains(index)) {
+                                                            selectedIndices.remove(index)
+                                                            if (selectedIndices.isEmpty()) isSelectionModeActive = false
+                                                        } else if (selectedIndices.size < maxSelectionLimit) selectedIndices.add(index)
+                                                        else showMaxSelectionToast = true
+                                                    } else if (changeLyrics && !isGuest) {
+                                                        if (item.time < playerConnection.player.duration + 30000L) {
+                                                            playerConnection.seekTo((item.time - (currentSong?.song?.lyricsOffset ?: 0)).coerceAtLeast(0))
+                                                        } else {
+                                                            scrollTargetIndex = index
+                                                            deferredCurrentLineIndex = index
+                                                        }
+                                                        isAutoScrollEnabled = true
+                                                        lastPreviewTime = 0L
                                                     }
-                                                    isAutoScrollEnabled = true
-                                                    lastPreviewTime = 0L
+                                                },
+                                                onLongClick = {
+                                                    if (!isGuest) {
+                                                        isSelectionModeActive = true
+                                                        selectedIndices.add(index)
+                                                    }
                                                 }
-                                            },
-                                            onLongClick = {
-                                                if (!isGuest) {
-                                                    isSelectionModeActive = true
-                                                    selectedIndices.add(index)
-                                                }
-                                            }
-                                        )
+                                            )
+                                        }
                                     }
                                 }
+                
+                                needsPreRender -> {
+                                    // Invisible render purely for measurement, there is no interactions, no visuals.
+                                    // Once itemHeights[listIndex] is set this branch is skipped entirely.
+                                    Box(modifier = Modifier.alpha(0f)) {
+                                        when (listItem) {
+                                            is LyricsListItem.Indicator -> {
+                                                IntervalIndicator(listItem.gapStartMs, listItem.gapEndMs - 650L, 0L, false, expressiveAccent,
+                                                    Modifier.fillMaxWidth().onSizeChanged { itemHeights[listIndex] = it.height }.padding(horizontal = 24.dp).wrapContentWidth(Alignment.CenterHorizontally))
+                                            }
+                                            is LyricsListItem.Line -> {
+                                                LyricsLine(
+                                                    index = listItem.index, item = listItem.entry, isSynced = isSynced,
+                                                    isActiveLine = false, bgVisible = false, isSelected = false,
+                                                    isSelectionModeActive = false, currentPositionState = 0L,
+                                                    lyricsOffset = 0L, playerConnection = playerConnection,
+                                                    lyricsTextSize = 36f, lyricsLineSpacing = 1.3f,
+                                                    expressiveAccent = expressiveAccent, lyricsTextPosition = lyricsTextPosition,
+                                                    respectAgentPositioning = respectAgentPositioning, isAutoScrollEnabled = false,
+                                                    displayedCurrentLineIndex = -1, romanizeAsMain = romanizeAsMain,
+                                                    enabledLanguages = enabledLanguages, romanizeLyrics = currentSong?.romanizeLyrics == true,
+                                                    onSizeChanged = { itemHeights[listIndex] = it },
+                                                    onClick = {}, onLongClick = {}
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                                // else: far off-screen and already measured,ig skip composition entirely
                             }
                         }
                     }
