@@ -317,7 +317,8 @@ object LyricsPlusProvider : LyricsProvider {
         val sb = StringBuilder(lyrics.size * 128)
 
         // Agent metadata header
-        response.metadata?.agents?.forEach { (alias, info) ->
+        response.metadata?.agents?.forEach { (_, info) ->
+            val alias = info.alias?.takeIf { it.isNotBlank() } ?: return@forEach
             sb.append("[agent:$alias:${info.type ?: "person"}:${info.name ?: ""}]\n")
         }
 
