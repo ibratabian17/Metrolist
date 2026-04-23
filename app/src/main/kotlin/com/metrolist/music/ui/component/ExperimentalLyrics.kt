@@ -503,54 +503,60 @@ fun ExperimentalLyrics(
         // Use a more permissive fallback for constraints to prevent "locks" if items are not measured yet
         val constraintLineHeightPx = with(density) { 120.dp.toPx() }
 
-        val positions = remember(itemHeights.toMap(), activeListIndex, mergedLyricsList) {
-            val map = mutableMapOf<Int, Float>()
-            if (activeListIndex == -1 || mergedLyricsList.isEmpty()) return@remember map
-            
-            map[activeListIndex] = 0f
-            var currentY = 0f
-            for (i in activeListIndex - 1 downTo 0) {
-                val item = mergedLyricsList[i]
-                val height = itemHeights[i]?.toFloat() ?: (if (item is LyricsListItem.Indicator) indicatorHeightPx else lineHeightPx)
-                val noGap = (item as? LyricsListItem.Line)?.entry?.isBackground == true || item is LyricsListItem.Indicator
-                currentY -= (height + if (noGap) 0f else with(density) { LYRICS_ITEM_GAP_DP.toPx() })
-                map[i] = currentY
+        val positions by remember(activeListIndex, mergedLyricsList) {
+            derivedStateOf {
+                val map = mutableMapOf<Int, Float>()
+                if (activeListIndex == -1 || mergedLyricsList.isEmpty()) return@derivedStateOf map
+                
+                map[activeListIndex] = 0f
+                var currentY = 0f
+                for (i in activeListIndex - 1 downTo 0) {
+                    val item = mergedLyricsList[i]
+                    val height = itemHeights[i]?.toFloat() ?: (if (item is LyricsListItem.Indicator) indicatorHeightPx else lineHeightPx)
+                    val noGap = (item as? LyricsListItem.Line)?.entry?.isBackground == true || item is LyricsListItem.Indicator
+                    currentY -= (height + if (noGap) 0f else with(density) { LYRICS_ITEM_GAP_DP.toPx() })
+                    map[i] = currentY
+                }
+                currentY = 0f
+                for (i in activeListIndex until mergedLyricsList.size - 1) {
+                    val currentItem = mergedLyricsList[i]
+                    val nextItem = mergedLyricsList[i + 1]
+                    val height = itemHeights[i]?.toFloat() ?: (if (currentItem is LyricsListItem.Indicator) indicatorHeightPx else lineHeightPx)
+                    val nextNoGap = (nextItem as? LyricsListItem.Line)?.entry?.isBackground == true || nextItem is LyricsListItem.Indicator
+                    currentY += (height + if (nextNoGap) 0f else with(density) { LYRICS_ITEM_GAP_DP.toPx() })
+                    map[i + 1] = currentY
+                }
+                map
             }
-            currentY = 0f
-            for (i in activeListIndex until mergedLyricsList.size - 1) {
-                val currentItem = mergedLyricsList[i]
-                val nextItem = mergedLyricsList[i + 1]
-                val height = itemHeights[i]?.toFloat() ?: (if (currentItem is LyricsListItem.Indicator) indicatorHeightPx else lineHeightPx)
-                val nextNoGap = (nextItem as? LyricsListItem.Line)?.entry?.isBackground == true || nextItem is LyricsListItem.Indicator
-                currentY += (height + if (nextNoGap) 0f else with(density) { LYRICS_ITEM_GAP_DP.toPx() })
-                map[i + 1] = currentY
-            }
-            map
         }
 
-        val minOffset = remember(itemHeights.toMap(), mergedLyricsList, activeListIndex, anchorY) {
-            if (mergedLyricsList.isEmpty() || activeListIndex == -1) return@remember 0f
-            val totalBelow = (activeListIndex until mergedLyricsList.size - 1).sumOf { i ->
-                val currentItem = mergedLyricsList[i]
-                val nextItem = mergedLyricsList[i + 1]
-                val height = itemHeights[i]?.toFloat() ?: (if (currentItem is LyricsListItem.Indicator) indicatorHeightPx else constraintLineHeightPx)
-                val nextNoGap = (nextItem as? LyricsListItem.Line)?.entry?.isBackground == true || nextItem is LyricsListItem.Indicator
-                (height + if (nextNoGap) 0f else with(density) { LYRICS_ITEM_GAP_DP.toPx() }).toDouble()
-            }.toFloat()
-            val lastItem = mergedLyricsList.last()
-            val lastHeight = itemHeights[mergedLyricsList.size - 1]?.toFloat() ?: (if (lastItem is LyricsListItem.Indicator) indicatorHeightPx else constraintLineHeightPx)
-            with(density) { 100.dp.toPx() } - anchorY - totalBelow - lastHeight
+        val minOffset by remember(mergedLyricsList, activeListIndex, anchorY) {
+            derivedStateOf {
+                if (mergedLyricsList.isEmpty() || activeListIndex == -1) return@derivedStateOf 0f
+                val totalBelow = (activeListIndex until mergedLyricsList.size - 1).sumOf { i ->
+                    val currentItem = mergedLyricsList[i]
+                    val nextItem = mergedLyricsList[i + 1]
+                    val height = itemHeights[i]?.toFloat() ?: (if (currentItem is LyricsListItem.Indicator) indicatorHeightPx else constraintLineHeightPx)
+                    val nextNoGap = (nextItem as? LyricsListItem.Line)?.entry?.isBackground == true || nextItem is LyricsListItem.Indicator
+                    (height + if (nextNoGap) 0f else with(density) { LYRICS_ITEM_GAP_DP.toPx() }).toDouble()
+                }.toFloat()
+                val lastItem = mergedLyricsList.last()
+                val lastHeight = itemHeights[mergedLyricsList.size - 1]?.toFloat() ?: (if (lastItem is LyricsListItem.Indicator) indicatorHeightPx else constraintLineHeightPx)
+                with(density) { 100.dp.toPx() } - anchorY - totalBelow - lastHeight
+            }
         }
 
-        val maxOffset = remember(itemHeights.toMap(), mergedLyricsList, activeListIndex, maxHeightPx, anchorY) {
-            if (mergedLyricsList.isEmpty() || activeListIndex == -1) return@remember 0f
-            val totalAbove = (0 until activeListIndex).sumOf { i ->
-                val item = mergedLyricsList[i]
-                val height = itemHeights[i]?.toFloat() ?: (if (item is LyricsListItem.Indicator) indicatorHeightPx else constraintLineHeightPx)
-                val noGap = (item as? LyricsListItem.Line)?.entry?.isBackground == true || item is LyricsListItem.Indicator
-                (height + if (noGap) 0f else with(density) { LYRICS_ITEM_GAP_DP.toPx() }).toDouble()
-            }.toFloat()
-            maxHeightPx - with(density) { 150.dp.toPx() } - anchorY + totalAbove
+        val maxOffset by remember(mergedLyricsList, activeListIndex, maxHeightPx, anchorY) {
+            derivedStateOf {
+                if (mergedLyricsList.isEmpty() || activeListIndex == -1) return@derivedStateOf 0f
+                val totalAbove = (0 until activeListIndex).sumOf { i ->
+                    val item = mergedLyricsList[i]
+                    val height = itemHeights[i]?.toFloat() ?: (if (item is LyricsListItem.Indicator) indicatorHeightPx else constraintLineHeightPx)
+                    val noGap = (item as? LyricsListItem.Line)?.entry?.isBackground == true || item is LyricsListItem.Indicator
+                    (height + if (noGap) 0f else with(density) { LYRICS_ITEM_GAP_DP.toPx() }).toDouble()
+                }.toFloat()
+                maxHeightPx - with(density) { 150.dp.toPx() } - anchorY + totalAbove
+            }
         }
 
         // Clamp to real content bounds only. minOffset/maxOffset already use conservative height
@@ -586,10 +592,12 @@ fun ExperimentalLyrics(
             if (showLyrics && mergedLyricsList.isNotEmpty()) {
                 isInitialLayout = true
                 snapshotFlow { 
-                    val h = itemHeights.toMap()
-                    val windowStart = (activeListIndex - 8).coerceAtLeast(0)
-                    val windowEnd = (activeListIndex + 12).coerceAtMost(mergedLyricsList.size - 1)
-                    (windowStart..windowEnd).all { h.containsKey(it) } 
+                    val visibleIndices = mergedLyricsList.indices.filter { i ->
+                        val pos = positions[i] ?: return@filter false
+                        val top = anchorY + pos + userManualOffset
+                        top > -200f && top < maxHeightPx + 200f
+                    }
+                    visibleIndices.isNotEmpty() && visibleIndices.all { itemHeights.containsKey(it) } 
                 }.first { it }
                 isInitialLayout = false
             }
@@ -605,8 +613,12 @@ fun ExperimentalLyrics(
                 if (needsMeasurement) {
                     isInitialLayout = true
                     snapshotFlow { 
-                        val hh = itemHeights.toMap()
-                        (windowStart..windowEnd).all { hh.containsKey(it) } 
+                        val visibleIndices = mergedLyricsList.indices.filter { i ->
+                            val pos = positions[i] ?: return@filter false
+                            val top = anchorY + pos + userManualOffset
+                            top > -200f && top < maxHeightPx + 200f
+                        }
+                        visibleIndices.isNotEmpty() && visibleIndices.all { itemHeights.containsKey(it) } 
                     }.first { it }
                     isInitialLayout = false
                 }
@@ -751,65 +763,75 @@ fun ExperimentalLyrics(
                                 layout(p.width, 0) { p.place(0, 0) }
                             }.offset { IntOffset(0, (animatedOffset + userManualOffset).roundToInt()) }
                         ) {
-                            when (listItem) {
-                                is LyricsListItem.Indicator -> {
-                                    val visible =
-                                        isAutoScrollEnabled &&
-                                            currentPositionState >= listItem.gapStartMs &&
-                                            currentPositionState <= listItem.gapEndMs - 650L
-                                    IntervalIndicator(listItem.gapStartMs, listItem.gapEndMs - 650L, currentPositionState, visible, expressiveAccent, 
-                                        Modifier.fillMaxWidth().onSizeChanged { itemHeights[listIndex] = it.height }.padding(horizontal = 24.dp).wrapContentWidth(Alignment.CenterHorizontally))
+                            val isVisible by remember {
+                                derivedStateOf {
+                                    val top = animatedOffset + userManualOffset
+                                    // Increased buffer to ensure items in the measurement window are rendered and measured
+                                    top > -2500f && top < maxHeightPx + 2500f
                                 }
-                                is LyricsListItem.Line -> {
-                                    val index = listItem.index
-                                    val item = listItem.entry
-                                    val isActiveLine = activeLineIndices.contains(index)
-                                    val pairedMainLineIndex = if (item.isBackground) (index - 1 downTo 0).firstOrNull { lines.getOrNull(it)?.isBackground == false } ?: -1 else -1
-                                    
-                                    val isInGapWithMain = if (item.isBackground && pairedMainLineIndex != -1) {
-                                        val pairedMainLine = lines[pairedMainLineIndex]
-                                        currentEffectivePosition >= pairedMainLine.time && currentEffectivePosition <= item.time
-                                    } else false
-                                    
-                                    val bgVisible = item.isBackground && (activeLineIndices.contains(pairedMainLineIndex) || activeLineIndices.contains(index) || isInGapWithMain)
-                                    
-                                    LyricsLine(
-                                        index = index, item = item, isSynced = isSynced,
-                                        isActiveLine = isActiveLine,
-                                        bgVisible = bgVisible, isSelected = selectedIndices.contains(index),
-                                        isSelectionModeActive = isSelectionModeActive, currentPositionState = currentPositionState,
-                                        lyricsOffset = (currentSong?.song?.lyricsOffset ?: 0).toLong(),
-                                        playerConnection = playerConnection, lyricsTextSize = 36f, lyricsLineSpacing = 1.3f,
-                                        expressiveAccent = expressiveAccent, lyricsTextPosition = lyricsTextPosition,
-                                        respectAgentPositioning = respectAgentPositioning, isAutoScrollEnabled = isAutoScrollEnabled,
-                                        displayedCurrentLineIndex = deferredCurrentLineIndex, romanizeAsMain = romanizeAsMain,
-                                        enabledLanguages = enabledLanguages, romanizeLyrics = currentSong?.romanizeLyrics == true,
-                                        onSizeChanged = { itemHeights[listIndex] = it },
-                                        onClick = {
-                                            if (isSelectionModeActive) {
-                                                if (selectedIndices.contains(index)) {
-                                                    selectedIndices.remove(index)
-                                                    if (selectedIndices.isEmpty()) isSelectionModeActive = false
-                                                } else if (selectedIndices.size < maxSelectionLimit) selectedIndices.add(index)
-                                                else showMaxSelectionToast = true
-                                            } else if (changeLyrics && !isGuest) {
-                                                if (item.time < playerConnection.player.duration + 30000L) {
-                                                    playerConnection.seekTo((item.time - (currentSong?.song?.lyricsOffset ?: 0)).coerceAtLeast(0))
-                                                } else {
-                                                    scrollTargetIndex = index
-                                                    deferredCurrentLineIndex = index
+                            }
+
+                            if (isVisible) {
+                                when (listItem) {
+                                    is LyricsListItem.Indicator -> {
+                                        val visible =
+                                            isAutoScrollEnabled &&
+                                                currentPositionState >= listItem.gapStartMs &&
+                                                currentPositionState <= listItem.gapEndMs - 650L
+                                        IntervalIndicator(listItem.gapStartMs, listItem.gapEndMs - 650L, currentPositionState, visible, expressiveAccent, 
+                                            Modifier.fillMaxWidth().onSizeChanged { itemHeights[listIndex] = it.height }.padding(horizontal = 24.dp).wrapContentWidth(Alignment.CenterHorizontally))
+                                    }
+                                    is LyricsListItem.Line -> {
+                                        val index = listItem.index
+                                        val item = listItem.entry
+                                        val isActiveLine = activeLineIndices.contains(index)
+                                        val pairedMainLineIndex = if (item.isBackground) (index - 1 downTo 0).firstOrNull { lines.getOrNull(it)?.isBackground == false } ?: -1 else -1
+                                        
+                                        val isInGapWithMain = if (item.isBackground && pairedMainLineIndex != -1) {
+                                            val pairedMainLine = lines[pairedMainLineIndex]
+                                            currentEffectivePosition >= pairedMainLine.time && currentEffectivePosition <= item.time
+                                        } else false
+                                        
+                                        val bgVisible = item.isBackground && (activeLineIndices.contains(pairedMainLineIndex) || activeLineIndices.contains(index) || isInGapWithMain)
+                                        
+                                        LyricsLine(
+                                            index = index, item = item, isSynced = isSynced,
+                                            isActiveLine = isActiveLine,
+                                            bgVisible = bgVisible, isSelected = selectedIndices.contains(index),
+                                            isSelectionModeActive = isSelectionModeActive, currentPositionState = currentPositionState,
+                                            lyricsOffset = (currentSong?.song?.lyricsOffset ?: 0).toLong(),
+                                            playerConnection = playerConnection, lyricsTextSize = 36f, lyricsLineSpacing = 1.3f,
+                                            expressiveAccent = expressiveAccent, lyricsTextPosition = lyricsTextPosition,
+                                            respectAgentPositioning = respectAgentPositioning, isAutoScrollEnabled = isAutoScrollEnabled,
+                                            displayedCurrentLineIndex = deferredCurrentLineIndex, romanizeAsMain = romanizeAsMain,
+                                            enabledLanguages = enabledLanguages, romanizeLyrics = currentSong?.romanizeLyrics == true,
+                                            onSizeChanged = { itemHeights[listIndex] = it },
+                                            onClick = {
+                                                if (isSelectionModeActive) {
+                                                    if (selectedIndices.contains(index)) {
+                                                        selectedIndices.remove(index)
+                                                        if (selectedIndices.isEmpty()) isSelectionModeActive = false
+                                                    } else if (selectedIndices.size < maxSelectionLimit) selectedIndices.add(index)
+                                                    else showMaxSelectionToast = true
+                                                } else if (changeLyrics && !isGuest) {
+                                                    if (item.time < playerConnection.player.duration + 30000L) {
+                                                        playerConnection.seekTo((item.time - (currentSong?.song?.lyricsOffset ?: 0)).coerceAtLeast(0))
+                                                    } else {
+                                                        scrollTargetIndex = index
+                                                        deferredCurrentLineIndex = index
+                                                    }
+                                                    isAutoScrollEnabled = true
+                                                    lastPreviewTime = 0L
                                                 }
-                                                isAutoScrollEnabled = true
-                                                lastPreviewTime = 0L
+                                            },
+                                            onLongClick = {
+                                                if (!isGuest) {
+                                                    isSelectionModeActive = true
+                                                    selectedIndices.add(index)
+                                                }
                                             }
-                                        },
-                                        onLongClick = {
-                                            if (!isSelectionModeActive) {
-                                                isSelectionModeActive = true
-                                                selectedIndices.add(index)
-                                            }
-                                        }
-                                    )
+                                        )
+                                    }
                                 }
                             }
                         }
