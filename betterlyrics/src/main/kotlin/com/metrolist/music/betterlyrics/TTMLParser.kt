@@ -329,12 +329,6 @@ object TTMLParser {
             }
         }
 
-        val hasBackgroundLine = lines.any { it.isBackground }
-        val multi =
-            agentMap.size > 1 ||
-                (agentMap.size == 1 && !agentMap.containsKey("v1")) ||
-                (hasBackgroundLine && agentMap.size == 1 && agentMap.containsKey("v1"))
-        
         val sb = StringBuilder(lines.size * 128)
 
         // Append agent headers
@@ -351,7 +345,7 @@ object TTMLParser {
             val agentId = agentMap[line.agent?.lowercase()]
             val tag = when {
                 isBg -> if (lastBg) "" else "{bg}"
-                multi && agentId != null -> "{agent:$agentId}"
+                !agentId.isNullOrBlank() -> "{agent:$agentId}"
                 else -> ""
             }
             if (isBg) lastBg = true

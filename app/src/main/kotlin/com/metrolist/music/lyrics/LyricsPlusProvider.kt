@@ -309,9 +309,6 @@ object LyricsPlusProvider : LyricsProvider {
                 agentMap[raw] = raw
             }
         }
-        val isMultiAgent = agentMap.size > 1 ||
-            (agentMap.size == 1 && !agentMap.containsKey("v1"))
-
         val sb = StringBuilder(lyrics.size * 128)
 
         // Agent metadata header
@@ -338,7 +335,7 @@ object LyricsPlusProvider : LyricsProvider {
             if (mainText.isNotBlank()) {
                 lastWasBg = false
                 val agentId  = agentMap[line.element?.singer?.lowercase()]
-                val agentTag = if (isMultiAgent && agentId != null) "{agent:$agentId}" else ""
+                val agentTag = if (!agentId.isNullOrBlank()) "{agent:$agentId}" else ""
                 sb.appendLrcLine(line.time, line.duration, agentTag, mainText)
                 if (isWordSync && mainWords.isNotEmpty()) sb.appendWordBlock(mainWords)
             }
