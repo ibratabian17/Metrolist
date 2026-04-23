@@ -274,7 +274,7 @@ object LyricsPlusProvider : LyricsProvider {
         val parsedLines = runCatching { TTMLParser.parseTTML(ttml, agentsMap) }
             .onFailure { Timber.tag("LyricsPlus").w(it, "Failed parsing binimum TTML") }
             .getOrNull()
-            ?: return null
+            ?.takeIf { it.isNotEmpty() } ?: return null
         val lrc = runCatching { TTMLParser.toLRC(parsedLines, agentsMap).trim() }
             .getOrNull()
             ?.takeIf { it.isNotBlank() }
