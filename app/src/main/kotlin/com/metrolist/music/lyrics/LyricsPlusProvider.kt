@@ -356,7 +356,12 @@ object LyricsPlusProvider : LyricsProvider {
                 if (bgText.isNotBlank()) {
                     val bgTime = bgToEmit.minOf { it.time }
                     val bgTag  = if (lastWasBg) "" else "{bg}"
-                    sb.appendLrcLine(bgTime, line.duration, bgTag, bgText)
+                    val bgDuration = bgToEmit
+                        .maxOf { it.time + it.duration }
+                        .minus(bgTime)
+                        .takeIf { it > 0 }
+                        ?: line.duration
+                    sb.appendLrcLine(bgTime, bgDuration, bgTag, bgText)
                     lastWasBg = true
                     if (isWordSync) sb.appendWordBlock(bgToEmit)
                 }
