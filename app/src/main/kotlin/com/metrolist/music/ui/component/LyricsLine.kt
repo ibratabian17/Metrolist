@@ -496,11 +496,13 @@ private fun WordLevelLyrics(
                         clusters.forEach { (range, _) ->
                             val i = range.first
                             if (wordIdxMap[i] == wIdx) {
-                                val bounds = layoutResult.getBoundingBox(i)
-                                left = minOf(left, bounds.left)
-                                right = maxOf(right, bounds.right)
-                                top = minOf(top, bounds.top)
-                                bottom = maxOf(bottom, bounds.bottom)
+                                for (idx in range) {
+                                    val bounds = layoutResult.getBoundingBox(idx)
+                                    left = minOf(left, bounds.left)
+                                    right = maxOf(right, bounds.right)
+                                    top = minOf(top, bounds.top)
+                                    bottom = maxOf(bottom, bounds.bottom)
+                                }
                                 found = true
                             }
                         }
@@ -596,10 +598,14 @@ private fun WordLevelLyrics(
 
                     val charScaleX = 1f + (wobble * 0.025f) + crescendoDeltaX + (nudgeScale * 0.3f)
                     
-                    var clusterWidth = 0f
+                    var clusterLeft = Float.MAX_VALUE
+                    var clusterRight = Float.MIN_VALUE
                     for (idx in range) {
-                        clusterWidth += layoutResult.getBoundingBox(idx).width
+                        val bounds = layoutResult.getBoundingBox(idx)
+                        clusterLeft = minOf(clusterLeft, bounds.left)
+                        clusterRight = maxOf(clusterRight, bounds.right)
                     }
+                    val clusterWidth = clusterRight - clusterLeft
                     lineTotalPushes[lineIdx] += clusterWidth * (charScaleX - 1f)
                 }
 
@@ -607,17 +613,19 @@ private fun WordLevelLyrics(
                     val i = range.first
                     val lineIdx = layoutResult.getLineForOffset(i)
                     
-                    var clusterWidth = 0f
-                    var clusterHeight = 0f
                     var clusterLeft = Float.MAX_VALUE
+                    var clusterRight = Float.MIN_VALUE
                     var clusterTop = Float.MAX_VALUE
+                    var clusterBottom = Float.MIN_VALUE
                     for (idx in range) {
                         val bounds = layoutResult.getBoundingBox(idx)
-                        clusterWidth += bounds.width
-                        clusterHeight = maxOf(clusterHeight, bounds.height)
                         clusterLeft = minOf(clusterLeft, bounds.left)
+                        clusterRight = maxOf(clusterRight, bounds.right)
                         clusterTop = minOf(clusterTop, bounds.top)
+                        clusterBottom = maxOf(clusterBottom, bounds.bottom)
                     }
+                    val clusterWidth = clusterRight - clusterLeft
+                    val clusterHeight = clusterBottom - clusterTop
 
                     val wordIdx = wordIdxMap[i]
                     val originalWordIdx = if (wordIdx != -1) effectiveToOriginalIdx[wordIdx] else -1
