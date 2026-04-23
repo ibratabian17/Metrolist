@@ -338,7 +338,7 @@ object LyricsPlusProvider : LyricsProvider {
                 lastWasBg = false
                 val agentId  = agentMap[line.element?.singer?.lowercase()]
                 val agentTag = if (isMultiAgent && agentId != null) "{agent:$agentId}" else ""
-                sb.appendLrcLine(line.time, agentTag, mainText)
+                sb.appendLrcLine(line.time, line.duration, agentTag, mainText)
                 if (isWordSync && mainWords.isNotEmpty()) sb.appendWordBlock(mainWords)
             }
 
@@ -352,7 +352,7 @@ object LyricsPlusProvider : LyricsProvider {
                 if (bgText.isNotBlank()) {
                     val bgTime = bgToEmit.minOf { it.time }
                     val bgTag  = if (lastWasBg) "" else "{bg}"
-                    sb.appendLrcLine(bgTime, bgTag, bgText)
+                    sb.appendLrcLine(bgTime, line.duration, bgTag, bgText)
                     lastWasBg = true
                     if (isWordSync) sb.appendWordBlock(bgToEmit)
                 }
@@ -367,10 +367,13 @@ object LyricsPlusProvider : LyricsProvider {
         words.joinToString("") { it.text }.trim()
 
     /** Appends `[mm:ss.cc]<tag>text\n` */
-    private fun StringBuilder.appendLrcLine(timeMs: Long, tag: String, text: String) {
+    private fun StringBuilder.appendLrcLine(timeMs: Long, durationMs: Long, tag: String, text: String) {
         append(formatLrcTime(timeMs))
         append(tag)
         append(text)
+        if (durationMs > 0) {
+            append(formatLrcTime(timeMs + durationMs))
+        }
         append('\n')
     }
 

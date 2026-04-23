@@ -29,6 +29,9 @@ private val PAXSENIX_BG_LINE_REGEX = "^\\[bg:\\s*(.*)\\]$".toRegex()
 private val AGENT_REGEX = "\\{agent:([^}]+)\\}".toRegex()
 private val BACKGROUND_REGEX = "^\\{bg\\}".toRegex()
 
+// Regex for trailing line-level end time or duration (supports [mm:ss.cc] and <mm:ss.cc>)
+private val TRAILING_TIME_REGEX = "[<\\[](\\d{1,2}):(\\d{2})\\.(\\d{2,3})[>\\]]\\s*$".toRegex()
+
 @Suppress("RegExpRedundantEscape")
 object LyricsUtils {
     fun cleanTitleForSearch(title: String): String {
@@ -480,11 +483,22 @@ object LyricsUtils {
                         } else null
                     }
                 
+                val endTimeMatch = TRAILING_TIME_REGEX.find(content)
+                val lineEndTimeMs = endTimeMatch?.let { match ->
+                    val min = match.groupValues[1].toLong()
+                    val sec = match.groupValues[2].toLong()
+                    val milString = match.groupValues[3]
+                    var mil = milString.toLong()
+                    if (milString.length == 2) mil *= 10
+                    min * DateUtils.MINUTE_IN_MILLIS + sec * DateUtils.SECOND_IN_MILLIS + mil
+                }
+                val contentToClean = if (endTimeMatch != null) content.replaceFirst(TRAILING_TIME_REGEX, "") else content
+
                 // Extract plain text (remove all <MM:SS.mm> tags)
-                val plainText = content.replace(Regex("<\\d{1,2}:\\d{2}\\.\\d{2,3}>\\s*"), "").trim()
+                val plainText = contentToClean.replace(Regex("<\\d{1,2}:\\d{2}\\.\\d{2,3}>\\s*"), "").trim()
                 
                 val lineTimeMs = wordTimings?.firstOrNull()?.startTime?.let { (it * 1000).toLong() } ?: 0L
-                result.add(LyricsEntry(lineTimeMs, plainText, wordTimings, agent = lastNonBgAgent ?: "bg", isBackground = true))
+                result.add(LyricsEntry(lineTimeMs, plainText, wordTimings, agent = lastNonBgAgent ?: "bg", isBackground = true, endTime = lineEndTimeMs))
                 return@forEachIndexed
             }
             
@@ -509,13 +523,24 @@ object LyricsUtils {
                         } else null
                     }
                 
+                val endTimeMatch = TRAILING_TIME_REGEX.find(content)
+                val lineEndTimeMs = endTimeMatch?.let { match ->
+                    val min = match.groupValues[1].toLong()
+                    val sec = match.groupValues[2].toLong()
+                    val milString = match.groupValues[3]
+                    var mil = milString.toLong()
+                    if (milString.length == 2) mil *= 10
+                    min * DateUtils.MINUTE_IN_MILLIS + sec * DateUtils.SECOND_IN_MILLIS + mil
+                }
+                val contentToClean = if (endTimeMatch != null) content.replaceFirst(TRAILING_TIME_REGEX, "") else content
+
                 // Extract plain text (remove all <MM:SS.mm> tags)
-                val plainText = content.replace(Regex("<\\d{1,2}:\\d{2}\\.\\d{2,3}>\\s*"), "").trim()
+                val plainText = contentToClean.replace(Regex("<\\d{1,2}:\\d{2}\\.\\d{2,3}>\\s*"), "").trim()
                 
                 if (!agent.isNullOrBlank()) {
                     lastNonBgAgent = agent
                 }
-                result.add(LyricsEntry(lineTimeMs, plainText, wordTimings, agent = agent, isBackground = false))
+                result.add(LyricsEntry(lineTimeMs, plainText, wordTimings, agent = agent, isBackground = false, endTime = lineEndTimeMs))
                 return@forEachIndexed
             }
             
@@ -554,13 +579,24 @@ object LyricsUtils {
                         } else null
                     }
 
+                val endTimeMatch = TRAILING_TIME_REGEX.find(content)
+                val lineEndTimeMs = endTimeMatch?.let { match ->
+                    val min = match.groupValues[1].toLong()
+                    val sec = match.groupValues[2].toLong()
+                    val milString = match.groupValues[3]
+                    var mil = milString.toLong()
+                    if (milString.length == 2) mil *= 10
+                    min * DateUtils.MINUTE_IN_MILLIS + sec * DateUtils.SECOND_IN_MILLIS + mil
+                }
+                val contentToClean = if (endTimeMatch != null) content.replaceFirst(TRAILING_TIME_REGEX, "") else content
+
                 // Extract plain text (remove all <MM:SS.mm> tags)
-                val plainText = content.replace(Regex("<\\d{1,2}:\\d{2}\\.\\d{2,3}>\\s*"), "").trim()
+                val plainText = contentToClean.replace(Regex("<\\d{1,2}:\\d{2}\\.\\d{2,3}>\\s*"), "").trim()
 
                 if (!isBackground && !agent.isNullOrBlank()) {
                     lastNonBgAgent = agent
                 }
-                result.add(LyricsEntry(lineTimeMs, plainText, wordTimings, agent = if (isBackground) lastNonBgAgent ?: "bg" else agent, isBackground = isBackground))
+                result.add(LyricsEntry(lineTimeMs, plainText, wordTimings, agent = if (isBackground) lastNonBgAgent ?: "bg" else agent, isBackground = isBackground, endTime = lineEndTimeMs))
             }
         }
 
@@ -769,6 +805,19 @@ object LyricsUtils {
             text = text.replaceFirst(BACKGROUND_REGEX, "")
         }
 
+        val endTimeMatch = TRAILING_TIME_REGEX.find(text)
+        var parsedEndTime: Long? = endTimeMatch?.let { match ->
+            val min = match.groupValues[1].toLong()
+            val sec = match.groupValues[2].toLong()
+            val milString = match.groupValues[3]
+            var mil = milString.toLong()
+            if (milString.length == 2) mil *= 10
+            min * DateUtils.MINUTE_IN_MILLIS + sec * DateUtils.SECOND_IN_MILLIS + mil
+        }
+        if (endTimeMatch != null) {
+            text = text.replaceFirst(TRAILING_TIME_REGEX, "")
+        }
+
         return timeMatchResults
             .map { timeMatchResult ->
                 val min = timeMatchResult.groupValues[1].toLong()
@@ -779,7 +828,7 @@ object LyricsUtils {
                     mil *= 10
                 }
                 val time = min * DateUtils.MINUTE_IN_MILLIS + sec * DateUtils.SECOND_IN_MILLIS + mil
-                LyricsEntry(time, text, words, agent = agent, isBackground = isBackground)
+                LyricsEntry(time, text, words, agent = agent, isBackground = isBackground, endTime = parsedEndTime)
             }.toList()
     }
 
@@ -814,7 +863,9 @@ object LyricsUtils {
             if (line.time > position) break // Past current position, stop early
 
             // Determine this line's end time
-            val lineEndMs: Long = if (!line.words.isNullOrEmpty()) {
+            val lineEndMs: Long = if (line.endTime != null && line.endTime > line.time) {
+                line.endTime
+            } else if (!line.words.isNullOrEmpty()) {
                 // Use last word's endTime converted to ms
                 (line.words.last().endTime * 1000).toLong()
             } else {

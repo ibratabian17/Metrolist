@@ -13,6 +13,7 @@ object TTMLParser {
     data class ParsedLine(
         val text: String,
         val startTime: Double,
+        val endTime: Double? = null,
         val words: List<ParsedWord>,
         val agent: String? = null,
         val isBackground: Boolean = false,
@@ -154,6 +155,8 @@ object TTMLParser {
         }
 
         val startTime = parseTime(begin) + offset
+        val end = timingAttr(p, "end")
+        val endTime = parseTime(end) + offset
         val spanInfos = mutableListOf<SpanInfo>()
         val backgroundLines = mutableListOf<ParsedLine>()
         
@@ -187,15 +190,17 @@ object TTMLParser {
                 listOf(ParsedLine(
                     text = backgroundLines.joinToString(" ") { it.text },
                     startTime = backgroundLines.minOf { it.startTime },
+                    endTime = null,
                     words = backgroundLines.flatMap { it.words },
                     isBackground = true
                 ))
             } else emptyList()
-            lines.add(ParsedLine(lineText, startTime, words, agent, isPBackground, bgLines))
+            lines.add(ParsedLine(lineText, startTime, endTime, words, agent, isPBackground, bgLines))
         } else if (backgroundLines.isNotEmpty()) {
             lines.add(ParsedLine(
                 text = backgroundLines.joinToString(" ") { it.text },
                 startTime = backgroundLines.minOf { it.startTime },
+                endTime = null,
                 words = backgroundLines.flatMap { it.words },
                 isBackground = true
             ))
@@ -235,12 +240,12 @@ object TTMLParser {
         
         if (!hasSpans) {
             val text = span.textContent?.trim() ?: ""
-            return ParsedLine(text, start, emptyList(), isBackground = true)
+            return ParsedLine(text, start, null, emptyList(), isBackground = true)
         }
         
         val words = mergeSpansIntoWords(spanInfos)
         val text = if (words.isEmpty()) getDirectText(span).trim() else buildLineText(words)
-        return ParsedLine(text, start, words, isBackground = true)
+        return ParsedLine(text, start, null, words, isBackground = true)
     }
 
     private fun getDirectText(el: Element): String {
@@ -342,7 +347,11 @@ object TTMLParser {
             }
             if (isBg) lastBg = true
 
-            sb.append(time).append(tag).append(line.text).append('\n')
+            val trailing = if (line.words.isEmpty() && line.endTime != null && line.endTime > line.startTime) {
+                formatLrcTime(line.endTime)
+            } else ""
+
+            sb.append(time).append(tag).append(line.text).append(trailing).append('\n')
             if (line.words.isNotEmpty()) {
                 sb.append('<')
                 line.words.forEachIndexed { i, w ->
