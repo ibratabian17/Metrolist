@@ -270,11 +270,12 @@ object LyricsPlusProvider : LyricsProvider {
             }
         } ?: return null
 
-        val parsedLines = runCatching { TTMLParser.parseTTML(ttml) }
+        val agentsMap = mutableMapOf<String, TTMLParser.TTMLAgent>()
+        val parsedLines = runCatching { TTMLParser.parseTTML(ttml, agentsMap) }
             .onFailure { Timber.tag("LyricsPlus").w(it, "Failed parsing binimum TTML") }
             .getOrNull()
-            ?.takeIf { it.isNotEmpty() } ?: return null
-        val lrc = runCatching { TTMLParser.toLRC(parsedLines).trim() }
+            ?: return null
+        val lrc = runCatching { TTMLParser.toLRC(parsedLines, agentsMap).trim() }
             .getOrNull()
             ?.takeIf { it.isNotBlank() }
             ?: return null
@@ -305,19 +306,19 @@ object LyricsPlusProvider : LyricsProvider {
         lyrics.forEach { line ->
             val raw = line.element?.singer?.lowercase() ?: return@forEach
             if (raw !in agentMap) {
-                agentMap[raw] = when {
-                    raw == "v1" || raw == "v2" || raw == "v1000" -> raw
-                    else -> {
-                        val taken = agentMap.values.toSet()
-                        listOf("v1", "v2").firstOrNull { it !in taken } ?: "v1"
-                    }
-                }
+                agentMap[raw] = raw
             }
         }
         val isMultiAgent = agentMap.size > 1 ||
             (agentMap.size == 1 && !agentMap.containsKey("v1"))
 
         val sb = StringBuilder(lyrics.size * 128)
+
+        // Agent metadata header
+        response.metadata?.agents?.forEach { (alias, info) ->
+            sb.append("[agent:$alias:${info.type ?: "person"}:${info.name ?: ""}]\n")
+        }
+
         var lastWasBg = false
 
         for (line in lyrics) {

@@ -138,6 +138,12 @@ internal fun LyricsLine(
         )
 
     val agentAlignment = when {
+        respectAgentPositioning && item.linePosition != null -> when (item.linePosition) {
+            LyricsPosition.LEFT -> Alignment.Start
+            LyricsPosition.RIGHT -> Alignment.End
+            LyricsPosition.CENTER -> Alignment.CenterHorizontally
+            else -> Alignment.CenterHorizontally
+        }
         respectAgentPositioning && item.agent == "v1" -> Alignment.Start
         respectAgentPositioning && item.agent == "v2" -> Alignment.End
         respectAgentPositioning && item.agent == "v1000" -> Alignment.CenterHorizontally
@@ -150,6 +156,12 @@ internal fun LyricsLine(
     }
     
     val agentTextAlign = when {
+        respectAgentPositioning && item.linePosition != null -> when (item.linePosition) {
+            LyricsPosition.LEFT -> TextAlign.Left
+            LyricsPosition.RIGHT -> TextAlign.Right
+            LyricsPosition.CENTER -> TextAlign.Center
+            else -> TextAlign.Center
+        }
         respectAgentPositioning && item.agent == "v1" -> TextAlign.Left
         respectAgentPositioning && item.agent == "v2" -> TextAlign.Right
         respectAgentPositioning && item.agent == "v1000" -> TextAlign.Center

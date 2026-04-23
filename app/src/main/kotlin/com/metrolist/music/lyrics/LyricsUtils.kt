@@ -11,6 +11,7 @@ import com.github.promeg.pinyinhelper.Pinyin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.Locale
+import com.metrolist.music.ui.screens.settings.LyricsPosition
 
 val LINE_REGEX = "((\\[\\d\\d:\\d\\d\\.\\d{2,3}\\] ?)+)(.*)".toRegex()
 val TIME_REGEX = "\\[(\\d\\d):(\\d\\d)\\.(\\d{2,3})\\]".toRegex()
@@ -32,8 +33,15 @@ private val BACKGROUND_REGEX = "^\\{bg\\}".toRegex()
 // Regex for trailing line-level end time or duration (supports [mm:ss.cc] and <mm:ss.cc>)
 private val TRAILING_TIME_REGEX = "[<\\[](\\d{1,2}):(\\d{2})\\.(\\d{2,3})[>\\]]\\s*$".toRegex()
 
+private val AGENT_HEADER_REGEX = "\\[agent:([^:]+):([^:]*):?([^]]*)\\]".toRegex()
+
 @Suppress("RegExpRedundantEscape")
 object LyricsUtils {
+    private data class LyricsAgentMetadata(
+        val id: String,
+        val type: String = "person",
+        val name: String = ""
+    )
     fun cleanTitleForSearch(title: String): String {
         return title.replace(Regex("\\s*[(\\[].*?[)\\]]"), "").trim()
     }
@@ -439,11 +447,21 @@ object LyricsUtils {
 
         val decodedLyrics = decodeHtmlEntities(unescapedLyrics)
 
-        val lines = decodedLyrics.lines()
-            .filter { 
-                it.isNotBlank() || it.trim().startsWith("[") || it.trim().startsWith("<")
+        val rawLines = decodedLyrics.lines()
+        val agents = mutableMapOf<String, LyricsAgentMetadata>()
+        val lines = rawLines.filter { line ->
+            val trimmed = line.trim()
+            val agentMatch = AGENT_HEADER_REGEX.find(trimmed)
+            if (agentMatch != null) {
+                val alias = agentMatch.groupValues[1]
+                val type = agentMatch.groupValues[2].ifEmpty { "person" }
+                val name = agentMatch.groupValues[3]
+                agents[alias] = LyricsAgentMetadata(alias, type, name)
+                false
+            } else {
+                trimmed.isNotBlank() || trimmed.startsWith("[") || trimmed.startsWith("<")
             }
-            .filter { !it.trim().startsWith("[offset:") }
+        }.filter { !it.trim().startsWith("[offset:") }
 
         // Check if this is rich sync format (contains <MM:SS.mm> patterns)
         val isRichSync = lines.any { line ->
@@ -451,10 +469,69 @@ object LyricsUtils {
             RICH_SYNC_WORD_REGEX.containsMatchIn(line)
         }
 
-        return if (isRichSync) {
+        val parsed = if (isRichSync) {
             parseRichSyncLyrics(lines)
         } else {
             parseStandardLyrics(lines)
+        }
+        
+        applyAgentPositioning(parsed, agents)
+        return parsed
+    }
+
+    private fun applyAgentPositioning(entries: List<LyricsEntry>, agentMetadata: Map<String, LyricsAgentMetadata>) {
+        if (entries.isEmpty()) return
+
+        var currentSideIsLeft = true
+        var lastPersonSingerId: String? = null
+        var rightCount = 0
+        var totalCount = 0
+
+        entries.forEach { entry ->
+            val singerId = entry.agent
+            if (singerId != null) {
+                val agentData = agentMetadata[singerId]
+                val type = agentData?.type ?: when (singerId) {
+                    "v1000" -> "group"
+                    "v2000" -> "other"
+                    else -> "person"
+                }
+
+                if (type == "group") {
+                    entry.linePosition = LyricsPosition.CENTER
+                } else {
+                    if (lastPersonSingerId == null) {
+                        currentSideIsLeft = type != "other"
+                    } else if (singerId != lastPersonSingerId) {
+                        currentSideIsLeft = !currentSideIsLeft
+                    }
+
+                    entry.linePosition = if (currentSideIsLeft) {
+                        LyricsPosition.LEFT
+                    } else {
+                        LyricsPosition.RIGHT
+                    }
+
+                    if (entry.linePosition == LyricsPosition.RIGHT) {
+                        rightCount++
+                    }
+                    totalCount++
+                    lastPersonSingerId = singerId
+                }
+            }
+        }
+
+        // 85% flip logic: if >= 85% of lines are on the right, flip all sides
+        if (totalCount > 0 && (rightCount.toDouble() / totalCount.toDouble()) >= 0.85) {
+            entries.forEach { entry ->
+                when (entry.linePosition) {
+                    LyricsPosition.LEFT -> 
+                        entry.linePosition = LyricsPosition.RIGHT
+                    LyricsPosition.RIGHT -> 
+                        entry.linePosition = LyricsPosition.LEFT
+                    else -> {}
+                }
+            }
         }
     }
 

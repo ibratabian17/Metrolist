@@ -19,6 +19,12 @@ object TTMLParser {
         val isBackground: Boolean = false,
         val backgroundLines: List<ParsedLine> = emptyList()
     )
+
+    data class TTMLAgent(
+        val id: String,
+        val type: String? = null,
+        val name: String? = null
+    )
     
     data class ParsedWord(
         val text: String,
@@ -74,7 +80,7 @@ object TTMLParser {
         return best
     }
     
-    fun parseTTML(ttml: String): List<ParsedLine> {
+    fun parseTTML(ttml: String, agentsOut: MutableMap<String, TTMLAgent>? = null): List<ParsedLine> {
         val lines = mutableListOf<ParsedLine>()
         try {
             val factory = DocumentBuilderFactory.newInstance()
@@ -93,6 +99,22 @@ object TTMLParser {
             if (head != null) {
                 val meta = findChild(head, "metadata")
                 if (meta != null) {
+                    var child = meta.firstChild
+                    while (child != null) {
+                        if (child is Element) {
+                            val name = child.localName ?: child.nodeName.substringAfterLast(':')
+                            if (name == "agent") {
+                                val id = child.getAttribute("xml:id").ifEmpty { child.getAttribute("id") }
+                                val type = child.getAttribute("type")
+                                val agentName = findChild(child, "name")?.textContent
+                                if (id.isNotEmpty()) {
+                                    agentsOut?.put(id, TTMLAgent(id, type, agentName))
+                                }
+                            }
+                        }
+                        child = child.nextSibling
+                    }
+
                     val audio = findChild(meta, "audio")
                     if (audio != null) {
                         globalOffset = audio.getAttribute("lyricOffset").toDoubleOrNull() ?: 0.0
@@ -296,34 +318,15 @@ object TTMLParser {
         return words.map { it.copy(text = it.text.trim()) }.filter { it.text.isNotEmpty() }
     }
 
-    fun toLRC(lines: List<ParsedLine>): String {
+    fun toLRC(lines: List<ParsedLine>, agents: Map<String, TTMLAgent> = emptyMap()): String {
         val agentMap = mutableMapOf<String, String>()
         
-        // Phase 1: Preserve explicit v1, v2, v1000
-        lines.forEach { line ->
-            line.agent?.lowercase()?.let { raw ->
-                if (raw == "v1" || raw == "v2" || raw == "v1000") {
-                    agentMap[raw] = raw
-                }
-            }
-        }
-        
-        // Phase 2: Map other agents to v1/v2 if available
-        var nextNum = 1
         lines.forEach { line ->
             line.agent?.lowercase()?.let { raw ->
                 if (!agentMap.containsKey(raw)) {
-                    while (nextNum <= 2 && (agentMap.containsKey("v$nextNum") || agentMap.values.contains("v$nextNum"))) {
-                        nextNum++
-                    }
-                    agentMap[raw] = if (nextNum <= 2) "v$nextNum" else "v1"
+                    agentMap[raw] = raw
                 }
             }
-        }
-
-        // v1000 (group) shares display slot with v2 when a primary v1 vocalist exists
-        if (agentMap.containsKey("v1000") && agentMap.containsKey("v1")) {
-            agentMap["v1000"] = "v2"
         }
 
         val hasBackgroundLine = lines.any { it.isBackground }
@@ -333,6 +336,12 @@ object TTMLParser {
                 (hasBackgroundLine && agentMap.size == 1 && agentMap.containsKey("v1"))
         
         val sb = StringBuilder(lines.size * 128)
+
+        // Append agent headers
+        agents.forEach { (id, info) ->
+            sb.append("[agent:$id:${info.type ?: "person"}:${info.name ?: ""}]\n")
+        }
+
         var lastBg = false
         lines.forEach { line ->
             val time = formatLrcTime(line.startTime)

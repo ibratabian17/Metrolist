@@ -6,6 +6,7 @@
 package com.metrolist.music.lyrics
 
 import kotlinx.coroutines.flow.MutableStateFlow
+import com.metrolist.music.ui.screens.settings.LyricsPosition
 
 data class WordTimestamp(
     val text: String,
@@ -22,7 +23,8 @@ data class LyricsEntry(
     val translatedTextFlow: MutableStateFlow<String?> = MutableStateFlow(null),
     val agent: String? = null,
     val isBackground: Boolean = false,
-    val endTime: Long? = null
+    val endTime: Long? = null,
+    var linePosition: LyricsPosition? = null
 ) : Comparable<LyricsEntry> {
     override fun compareTo(other: LyricsEntry): Int = (time - other.time).toInt()
 
