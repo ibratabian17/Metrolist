@@ -138,6 +138,7 @@ private val LYRICS_FADE_BOTTOM_DP = 160.dp
 private const val LYRICS_STAGGER_DELAY_PER_DISTANCE = 20
 private const val LYRICS_STAGGER_DELAY_MAX_MS = 200
 private const val LYRICS_PREVIEW_TIME = 8000L
+private const val LYRICS_SCROLL_DURATION = 750
 
 @OptIn(
     ExperimentalMaterial3Api::class,
@@ -368,7 +369,7 @@ fun ExperimentalLyrics(
             val effectivePosition = position + lyricsOffset
             
             val initialActiveIndices = findActiveLineIndices(lines, effectivePosition)
-            val scrollActiveIndicesRaw = findActiveLineIndices(lines, effectivePosition + (if (hasWordTimings) 0L else 250L))
+            val scrollActiveIndicesRaw = findActiveLineIndices(lines, effectivePosition + (LYRICS_SCROLL_DURATION / 2))
             
             val scrollActiveIndices = scrollActiveIndicesRaw.toMutableSet()
             for (i in scrollActiveIndicesRaw) {
@@ -729,7 +730,7 @@ fun ExperimentalLyrics(
                         targetValue = targetProviderBase,
                         animationSpec = if (isInitialLayout || !isAutoScrollEnabled) snap()
                         else {
-                            tween(750, 0, FastOutSlowInEasing)
+                            tween(LYRICS_SCROLL_DURATION, 0, FastOutSlowInEasing)
                         },
                         label = "lyricsProviderOffset"
                     )
@@ -752,7 +753,7 @@ fun ExperimentalLyrics(
                             targetValue = if (isAutoScrollEnabled) targetOffset else frozenOffset.floatValue,
                             animationSpec = if (isInitialLayout || !isAutoScrollEnabled) snap() 
                                             else {
-                                                tween(750, (distance * LYRICS_STAGGER_DELAY_PER_DISTANCE).coerceAtMost(LYRICS_STAGGER_DELAY_MAX_MS), FastOutSlowInEasing)
+                                                tween(LYRICS_SCROLL_DURATION, (distance * LYRICS_STAGGER_DELAY_PER_DISTANCE).coerceAtMost(LYRICS_STAGGER_DELAY_MAX_MS), FastOutSlowInEasing)
                                             },
                             label = "lyricStaggeredOffset_$listIndex"
                         )
