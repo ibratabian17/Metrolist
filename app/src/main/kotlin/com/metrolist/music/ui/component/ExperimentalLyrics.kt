@@ -354,7 +354,8 @@ fun ExperimentalLyrics(
                 sliderPosition!!
             } else {
                 val playerPos = playerConnection.player.currentPosition
-                if (playerPos != lastPlayerPos) {
+                val timeSinceUpdate = now - lastUpdateTime
+                if (playerPos != lastPlayerPos || timeSinceUpdate > 500L) {
                     lastPlayerPos = playerPos
                     lastUpdateTime = now
                 }
