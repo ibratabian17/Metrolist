@@ -73,6 +73,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.res.stringResource
 import android.text.Layout
 import androidx.compose.ui.unit.Constraints
@@ -499,6 +500,7 @@ fun ExperimentalLyrics(
     ) {
         val maxHeightPx = constraints.maxHeight.toFloat()
         val anchorY = maxHeightPx * LYRICS_ANCHOR_RATIO
+        val viewConfiguration = LocalViewConfiguration.current
         val lineHeightPx = with(density) { LYRICS_ITEM_FALLBACK_HEIGHT_DP.toPx() }
         val indicatorHeightPx = with(density) { 72.dp.toPx() }
         
@@ -702,20 +704,37 @@ fun ExperimentalLyrics(
                                 if (isInitialLayout) continue
                                 flingJob?.cancel()
                                 velocityTracker.resetTracking()
-                                isAutoScrollEnabled = false
-                                lastPreviewTime = System.currentTimeMillis()
                                 velocityTracker.addPosition(down.uptimeMillis, down.position)
+
+                                var didDrag = false
+                                val downTime = System.currentTimeMillis()
                                 verticalDrag(down.id) { change ->
-                                    userManualOffset = (userManualOffset + change.positionChange().y).coerceIn(scrollClampMin, scrollClampMax)
+                                    val dy = change.positionChange().y
+
+                                    // Commit to drag only if finger moved past slop and
+                                    // with sumn enough time passed to rule out a tap/long-press gesture.
+                                    // This handles the natural micro-movement fingers make even on a "still" press.
+                                    if (!didDrag && abs(dy) > viewConfiguration.touchSlop * 2f
+                                        && (System.currentTimeMillis() - downTime) > 80L) {
+                                        didDrag = true
+                                        isAutoScrollEnabled = false
+                                        lastPreviewTime = System.currentTimeMillis()
+                                    }
+                                    if (didDrag) {
+                                        userManualOffset = (userManualOffset + dy).coerceIn(scrollClampMin, scrollClampMax)
+                                    }
                                     velocityTracker.addPosition(change.uptimeMillis, change.position)
                                     change.consume()
                                 }
-                                val velocity = velocityTracker.calculateVelocity().y
-                                flingJob = scope.launch {
-                                    AnimationState(initialValue = userManualOffset, initialVelocity = velocity).animateDecay(decayAnimSpec) {
-                                        val clamped = value.coerceIn(scrollClampMin, scrollClampMax)
-                                        userManualOffset = clamped
-                                        if (value != clamped) cancelAnimation()
+                                
+                                if (didDrag) {
+                                    val velocity = velocityTracker.calculateVelocity().y
+                                    flingJob = scope.launch {
+                                        AnimationState(initialValue = userManualOffset, initialVelocity = velocity).animateDecay(decayAnimSpec) {
+                                            val clamped = value.coerceIn(scrollClampMin, scrollClampMax)
+                                            userManualOffset = clamped
+                                            if (value != clamped) cancelAnimation()
+                                        }
                                     }
                                 }
                             }
